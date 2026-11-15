@@ -1,0 +1,10 @@
+{
+  "java.project.sourcePaths": [
+    "winter_village_javafx/src/main/java"
+  ],
+  "java.project.outputPath": "winter_village_javafx/out/classes",
+  "java.project.referencedLibraries": [
+    "winter_village_javafx/lib/**/*.jar"
+  ],
+  "java.configuration.updateBuildConfiguration": "automatic"
+}

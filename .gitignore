@@ -1,0 +1,5 @@
+.DS_Store
+vendor/
+winter_village_javafx/out/
+*.class
+*.zip
