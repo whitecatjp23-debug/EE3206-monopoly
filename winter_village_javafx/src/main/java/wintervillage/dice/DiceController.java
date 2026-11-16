@@ -25,38 +25,16 @@ import java.util.Random;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
-/**
- * Two 3D dice, deterministic face orientation, rolling animation and the
- * dice-to-movement turn loop.
- *
- * <p>The model is loaded once and copied into two independent Groups. Each
- * instance has this hierarchy:</p>
- *
- * <pre>
- * root (board placement)
- *   tumble (X/Y/Z rotation)
- *     yaw (vertical spin)
- *       face (value-to-top rotation)
- *         dice model
- * </pre>
- *
- * The face mapping is fixed before the animation starts. The tumble angles
- * always end on exact multiples of 360 degrees, so the settled top face is the
- * generated value. The animation therefore cannot disagree with the game
- * logic, and no random visible result is generated after the roll.
- */
 public final class DiceController {
 
     public enum State { IDLE, ROLLING, RESULT_READY, MOVING }
 
     public record RollResult(int die1, int die2) {
-        public int total() {
-            return die1 + die2;
-        }
+        public int total() { return die1 + die2; }
     }
 
-    /** The exported dice is 0.342 m; 1 mm clearance for the raised pips. */
     private static final double DICE_HALF_HEIGHT = 0.172;
+    private static final int JAIL_TILE = 10;
 
     private final Group layer = new Group();
     private final PlayerTokenLayer playerTokens;
@@ -72,6 +50,7 @@ public final class DiceController {
     private BooleanSupplier externalBusy = () -> false;
     private boolean autoMovement = true;
     private RollResult lastResult;
+    private int consecutiveDoubles = 0;
 
     public DiceController(Group parent,
                           WinterVillageProfile profile,
@@ -104,8 +83,16 @@ public final class DiceController {
         playerTokens.setOnMovementFinished((player, tile) -> {
             if (state == State.MOVING) {
                 setState(State.IDLE);
-                if (onTurnComplete != null) {
-                    onTurnComplete.run();
+
+                boolean wasDouble = lastResult != null
+                        && lastResult.die1() == lastResult.die2();
+
+                if (wasDouble) {
+                    System.out.println("[dice] Double → same player rolls again");
+                } else {
+                    if (onTurnComplete != null) {
+                        onTurnComplete.run();
+                    }
                 }
             }
         });
@@ -115,17 +102,9 @@ public final class DiceController {
                 path.getFileName(), homeZ, centerY);
     }
 
-    public Group getLayer() {
-        return layer;
-    }
-
-    public State getState() {
-        return state;
-    }
-
-    public boolean isBusy() {
-        return state != State.IDLE;
-    }
+    public Group getLayer() { return layer; }
+    public State getState() { return state; }
+    public boolean isBusy() { return state != State.IDLE; }
 
     public boolean canRoll() {
         return state == State.IDLE
@@ -133,99 +112,91 @@ public final class DiceController {
                 && !externalBusy.getAsBoolean();
     }
 
-    /** Additional view-level guard, e.g. a running card animation. */
     public void setExternalBusy(BooleanSupplier supplier) {
         externalBusy = supplier == null ? () -> false : supplier;
     }
 
-    public Point3D getFocusPoint() {
-        return focusPoint;
-    }
+    public Point3D getFocusPoint() { return focusPoint; }
+    public RollResult getLastResult() { return lastResult; }
+    public void setOnRollResult(Consumer<RollResult> listener) { this.onRollResult = listener; }
+    public void setOnStateChanged(Consumer<State> listener) { this.onStateChanged = listener; }
+    public void setOnTurnComplete(Runnable listener) { this.onTurnComplete = listener; }
+    public void setAutoMovement(boolean enabled) { this.autoMovement = enabled; }
+    public boolean isAutoMovement() { return autoMovement; }
 
-    public RollResult getLastResult() {
-        return lastResult;
-    }
-
-    public void setOnRollResult(Consumer<RollResult> listener) {
-        this.onRollResult = listener;
-    }
-
-    public void setOnStateChanged(Consumer<State> listener) {
-        this.onStateChanged = listener;
-    }
-
-    public void setOnTurnComplete(Runnable listener) {
-        this.onTurnComplete = listener;
-    }
-
-    /**
-     * Default true preserves the built-in loop: dice settle, then the current
-     * player automatically moves the rolled total. Rules code can disable it,
-     * receive onRollResult, apply modifiers, and call beginMovement(steps) or
-     * completeTurn() itself.
-     */
-    public void setAutoMovement(boolean enabled) {
-        this.autoMovement = enabled;
-    }
-
-    public boolean isAutoMovement() {
-        return autoMovement;
-    }
-
-    /**
-     * Move the current player by a rules-decided number of steps after a
-     * settled result. Only valid in RESULT_READY.
-     */
+    // ============================================================
+    // FIXED: Use moveCurrentPlayer on doubles, moveNextPlayer otherwise
+    // ============================================================
     public boolean beginMovement(int steps) {
-        if (state != State.RESULT_READY) {
-            return false;
-        }
+        if (state != State.RESULT_READY) return false;
         setState(State.MOVING);
-        if (!playerTokens.moveNextPlayer(steps)) {
+
+        boolean wasDouble = lastResult != null
+                && lastResult.die1() == lastResult.die2();
+
+        boolean moved = wasDouble
+                ? playerTokens.moveCurrentPlayer(steps)   // same player, no turn advance
+                : playerTokens.moveNextPlayer(steps);     // advance turn
+
+        if (!moved) {
             setState(State.IDLE);
             return false;
         }
         return true;
     }
 
-    /**
-     * Finish a turn without moving (for example a card that teleports the
-     * token). Only valid in RESULT_READY; the normal movement callback handles
-     * turns that use beginMovement.
-     */
     public void completeTurn() {
         if (state == State.RESULT_READY) {
             setState(State.IDLE);
-            if (onTurnComplete != null) {
-                onTurnComplete.run();
-            }
+            if (onTurnComplete != null) onTurnComplete.run();
         }
     }
 
-    /** Production roll: two independent uniform values from 1 to 6. */
     public boolean rollRandom() {
         int first = random.nextInt(6) + 1;
         int second = random.nextInt(6) + 1;
         return roll(first, second);
     }
 
-    /**
-     * Deterministic roll hook for tests and review captures. The values are
-     * fixed before the animation begins; production code uses
-     * {@link #rollRandom()}.
-     */
     public boolean roll(int first, int second) {
-        if (!canRoll() || first < 1 || first > 6 || second < 1 || second > 6) {
-            return false;
-        }
+        if (!canRoll() || first < 1 || first > 6 || second < 1 || second > 6) return false;
         lastResult = new RollResult(first, second);
         setState(State.ROLLING);
 
-        // The values are fixed before any animation starts. The face mapping
-        // is applied a fraction of a second into the tumble, so the initial
-        // resting dice do not visibly snap to their result at click time.
+        boolean isDouble = (first == second);
+        if (isDouble) consecutiveDoubles++; else consecutiveDoubles = 0;
+
+        if (consecutiveDoubles >= 3) {
+            consecutiveDoubles = 0;
+            animateRoll(first, second, () -> {
+                setState(State.RESULT_READY);
+                if (onRollResult != null) onRollResult.accept(lastResult);
+                int currentPlayer = playerTokens.getTurnIndex();
+                playerTokens.teleportPlayer(currentPlayer, JAIL_TILE);
+                setState(State.IDLE);
+                if (onTurnComplete != null) onTurnComplete.run();
+            });
+            return true;
+        }
+
+        animateRoll(first, second, () -> {
+            setState(State.RESULT_READY);
+            if (onRollResult != null) onRollResult.accept(lastResult);
+            if (!autoMovement) return;
+            PauseTransition hold = new PauseTransition(Duration.millis(380));
+            hold.setOnFinished(h -> {
+                if (autoMovement && state == State.RESULT_READY) {
+                    beginMovement(lastResult.total());
+                }
+            });
+            hold.play();
+        });
+        return true;
+    }
+
+    private void animateRoll(int first, int second, Runnable onDone) {
         PauseTransition faceSwap = new PauseTransition(Duration.millis(110));
-        faceSwap.setOnFinished(event -> {
+        faceSwap.setOnFinished(e -> {
             die1.setFinalOrientation(first, settledYaw(first, 0));
             die2.setFinalOrientation(second, settledYaw(second, 1));
         });
@@ -234,45 +205,9 @@ public final class DiceController {
         Timeline roll1 = rollTimeline(die1, 1280, -1);
         Timeline roll2 = rollTimeline(die2, 1450, 1);
         ParallelTransition rolling = new ParallelTransition(roll1, roll2);
-        rolling.setOnFinished(event -> {
-            setState(State.RESULT_READY);
-            if (onRollResult != null) {
-                onRollResult.accept(lastResult);
-            }
-            if (!autoMovement) {
-                // Rules code owns movement now. It can call beginMovement(...)
-                // from onRollResult or later, or completeTurn() for no move.
-                return;
-            }
-            // Let the settled result read for a moment before movement.
-            PauseTransition resultHold = new PauseTransition(Duration.millis(380));
-            resultHold.setOnFinished(hold -> {
-                if (autoMovement && state == State.RESULT_READY) {
-                    beginMovement(lastResult.total());
-                }
-            });
-            resultHold.play();
-        });
+        rolling.setOnFinished(e -> onDone.run());
         rolling.play();
-        return true;
     }
-
-    /** Set two stable faces without rolling; used for deterministic review captures. */
-    public boolean setPreviewValues(int first, int second) {
-        if (state != State.IDLE || first < 1 || first > 6 || second < 1 || second > 6) {
-            return false;
-        }
-        lastResult = new RollResult(first, second);
-        die1.setFinalOrientation(first, settledYaw(first, 0));
-        die2.setFinalOrientation(second, settledYaw(second, 1));
-        die1.resetPose();
-        die2.resetPose();
-        return true;
-    }
-
-    // ------------------------------------------------------------------
-    // Animation
-    // ------------------------------------------------------------------
 
     private Timeline rollTimeline(Dice die, int durationMs, int direction) {
         double startX = die.root.getTranslateX();
@@ -298,73 +233,43 @@ public final class DiceController {
                 new KeyValue(die.rotZ.angleProperty(), startRz)));
 
         timeline.getKeyFrames().add(new KeyFrame(Duration.millis(100),
-                new KeyValue(die.root.translateYProperty(), homeY + 0.055,
-                        Interpolator.EASE_OUT),
+                new KeyValue(die.root.translateYProperty(), homeY + 0.055, Interpolator.EASE_OUT),
                 new KeyValue(die.root.translateXProperty(), startX + direction * 0.035),
                 new KeyValue(die.root.translateZProperty(), startZ + 0.020)));
 
-        timeline.getKeyFrames().add(new KeyFrame(
-                Duration.millis(durationMs * 0.24),
-                new KeyValue(die.root.translateXProperty(), homeX + direction * 0.24,
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.root.translateZProperty(), homeZ + 0.16,
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.root.translateYProperty(), homeY + 0.24,
-                        Interpolator.EASE_OUT),
-                new KeyValue(die.rotX.angleProperty(), interpolate(startRx, endRx, 0.22),
-                        Interpolator.EASE_IN),
-                new KeyValue(die.rotY.angleProperty(), interpolate(startRy, endRy, 0.28),
-                        Interpolator.EASE_IN),
-                new KeyValue(die.rotZ.angleProperty(), interpolate(startRz, endRz, 0.18),
-                        Interpolator.EASE_IN)));
+        timeline.getKeyFrames().add(new KeyFrame(Duration.millis(durationMs * 0.24),
+                new KeyValue(die.root.translateXProperty(), homeX + direction * 0.24, Interpolator.EASE_BOTH),
+                new KeyValue(die.root.translateZProperty(), homeZ + 0.16, Interpolator.EASE_BOTH),
+                new KeyValue(die.root.translateYProperty(), homeY + 0.24, Interpolator.EASE_OUT),
+                new KeyValue(die.rotX.angleProperty(), interpolate(startRx, endRx, 0.22), Interpolator.EASE_IN),
+                new KeyValue(die.rotY.angleProperty(), interpolate(startRy, endRy, 0.28), Interpolator.EASE_IN),
+                new KeyValue(die.rotZ.angleProperty(), interpolate(startRz, endRz, 0.18), Interpolator.EASE_IN)));
 
-        timeline.getKeyFrames().add(new KeyFrame(
-                Duration.millis(durationMs * 0.56),
-                new KeyValue(die.root.translateXProperty(), homeX + direction * 0.15,
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.root.translateZProperty(), homeZ + 0.20,
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.root.translateYProperty(), homeY + 0.18,
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.rotX.angleProperty(), interpolate(startRx, endRx, 0.58),
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.rotY.angleProperty(), interpolate(startRy, endRy, 0.52),
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.rotZ.angleProperty(), interpolate(startRz, endRz, 0.62),
-                        Interpolator.EASE_BOTH)));
+        timeline.getKeyFrames().add(new KeyFrame(Duration.millis(durationMs * 0.56),
+                new KeyValue(die.root.translateXProperty(), homeX + direction * 0.15, Interpolator.EASE_BOTH),
+                new KeyValue(die.root.translateZProperty(), homeZ + 0.20, Interpolator.EASE_BOTH),
+                new KeyValue(die.root.translateYProperty(), homeY + 0.18, Interpolator.EASE_BOTH),
+                new KeyValue(die.rotX.angleProperty(), interpolate(startRx, endRx, 0.58), Interpolator.EASE_BOTH),
+                new KeyValue(die.rotY.angleProperty(), interpolate(startRy, endRy, 0.52), Interpolator.EASE_BOTH),
+                new KeyValue(die.rotZ.angleProperty(), interpolate(startRz, endRz, 0.62), Interpolator.EASE_BOTH)));
 
-        timeline.getKeyFrames().add(new KeyFrame(
-                Duration.millis(durationMs * 0.82),
-                new KeyValue(die.root.translateXProperty(), homeX + direction * 0.05,
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.root.translateZProperty(), homeZ + 0.05,
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.root.translateYProperty(), homeY + 0.09,
-                        Interpolator.EASE_BOTH),
-                new KeyValue(die.rotX.angleProperty(), interpolate(startRx, endRx, 0.84),
-                        Interpolator.EASE_OUT),
-                new KeyValue(die.rotY.angleProperty(), interpolate(startRy, endRy, 0.82),
-                        Interpolator.EASE_OUT),
-                new KeyValue(die.rotZ.angleProperty(), interpolate(startRz, endRz, 0.86),
-                        Interpolator.EASE_OUT)));
+        timeline.getKeyFrames().add(new KeyFrame(Duration.millis(durationMs * 0.82),
+                new KeyValue(die.root.translateXProperty(), homeX + direction * 0.05, Interpolator.EASE_BOTH),
+                new KeyValue(die.root.translateZProperty(), homeZ + 0.05, Interpolator.EASE_BOTH),
+                new KeyValue(die.root.translateYProperty(), homeY + 0.09, Interpolator.EASE_BOTH),
+                new KeyValue(die.rotX.angleProperty(), interpolate(startRx, endRx, 0.84), Interpolator.EASE_OUT),
+                new KeyValue(die.rotY.angleProperty(), interpolate(startRy, endRy, 0.82), Interpolator.EASE_OUT),
+                new KeyValue(die.rotZ.angleProperty(), interpolate(startRz, endRz, 0.86), Interpolator.EASE_OUT)));
 
-        timeline.getKeyFrames().add(new KeyFrame(
-                Duration.millis(durationMs - 130),
-                new KeyValue(die.root.translateXProperty(), homeX,
-                        Interpolator.EASE_OUT),
-                new KeyValue(die.root.translateZProperty(), homeZ,
-                        Interpolator.EASE_OUT),
-                new KeyValue(die.root.translateYProperty(), homeY + 0.028,
-                        Interpolator.EASE_OUT),
-                new KeyValue(die.rotX.angleProperty(), endRx - 45,
-                        Interpolator.EASE_OUT),
-                new KeyValue(die.rotY.angleProperty(), endRy - 35,
-                        Interpolator.EASE_OUT),
-                new KeyValue(die.rotZ.angleProperty(), endRz - 25,
-                        Interpolator.EASE_OUT)));
+        timeline.getKeyFrames().add(new KeyFrame(Duration.millis(durationMs - 130),
+                new KeyValue(die.root.translateXProperty(), homeX, Interpolator.EASE_OUT),
+                new KeyValue(die.root.translateZProperty(), homeZ, Interpolator.EASE_OUT),
+                new KeyValue(die.root.translateYProperty(), homeY + 0.028, Interpolator.EASE_OUT),
+                new KeyValue(die.rotX.angleProperty(), endRx - 45, Interpolator.EASE_OUT),
+                new KeyValue(die.rotY.angleProperty(), endRy - 35, Interpolator.EASE_OUT),
+                new KeyValue(die.rotZ.angleProperty(), endRz - 25, Interpolator.EASE_OUT)));
 
-        timeline.getKeyFrames().add(new KeyFrame(
-                Duration.millis(durationMs),
+        timeline.getKeyFrames().add(new KeyFrame(Duration.millis(durationMs),
                 new KeyValue(die.root.translateXProperty(), homeX),
                 new KeyValue(die.root.translateZProperty(), homeZ),
                 new KeyValue(die.root.translateYProperty(), homeY),
@@ -383,21 +288,13 @@ public final class DiceController {
     }
 
     private static double settledYaw(int value, int dieIndex) {
-        // Fixed per-value yaw makes review captures reproducible; the top face
-        // is unaffected by a vertical spin.
         return (value * 37.0 + dieIndex * 61.0) % 360.0;
     }
 
     private void setState(State next) {
         state = next;
-        if (onStateChanged != null) {
-            onStateChanged.accept(next);
-        }
+        if (onStateChanged != null) onStateChanged.accept(next);
     }
-
-    // ------------------------------------------------------------------
-    // Model cloning / assets
-    // ------------------------------------------------------------------
 
     private static Node copyNode(Node node) {
         if (node instanceof MeshView source) {
@@ -412,9 +309,7 @@ public final class DiceController {
             Group copy = new Group();
             copy.setId(source.getId());
             copy.getTransforms().addAll(source.getTransforms());
-            for (Node child : source.getChildren()) {
-                copy.getChildren().add(copyNode(child));
-            }
+            for (Node child : source.getChildren()) copy.getChildren().add(copyNode(child));
             return copy;
         }
         return new Group();
@@ -431,27 +326,16 @@ public final class DiceController {
         String monopolyRoot = System.getProperty("monopoly.assets.root");
         if (monopolyRoot != null && !monopolyRoot.isBlank()) {
             Path path = Path.of(monopolyRoot, "props", "dice_01", "dice_01.glb");
-            if (Files.isRegularFile(path)) {
-                return path.toAbsolutePath().normalize();
-            }
+            if (Files.isRegularFile(path)) return path.toAbsolutePath().normalize();
         }
         Path local = Path.of("assets", "dice", "dice_01.glb");
-        if (Files.isRegularFile(local)) {
-            return local.toAbsolutePath().normalize();
-        }
+        if (Files.isRegularFile(local)) return local.toAbsolutePath().normalize();
         Path fromRoot = Path.of("winter_village_javafx", "assets", "dice", "dice_01.glb");
-        if (Files.isRegularFile(fromRoot)) {
-            return fromRoot.toAbsolutePath().normalize();
-        }
+        if (Files.isRegularFile(fromRoot)) return fromRoot.toAbsolutePath().normalize();
         return local.toAbsolutePath().normalize();
     }
 
-    // ------------------------------------------------------------------
-    // One die instance
-    // ------------------------------------------------------------------
-
     private final class Dice {
-
         private final Group root = new Group();
         private final Group tumble = new Group();
         private final Group yawGroup = new Group();
@@ -462,21 +346,13 @@ public final class DiceController {
         private final Rotate yawRotate = new Rotate(0, Rotate.Y_AXIS);
         private final Rotate faceRotate = new Rotate(0, Rotate.Z_AXIS);
 
-        private final double homeX;
-        private final double homeY;
-        private final double homeZ;
+        private final double homeX, homeY, homeZ;
 
         private Dice(Group model, double x, double y, double z, int index) {
-            homeX = x;
-            homeY = y;
-            homeZ = z;
+            homeX = x; homeY = y; homeZ = z;
             root.setId("DiceRoot_" + index);
-            root.setTranslateX(x);
-            root.setTranslateY(y);
-            root.setTranslateZ(z);
-            root.setScaleX(1.0);
-            root.setScaleY(1.0);
-            root.setScaleZ(1.0);
+            root.setTranslateX(x); root.setTranslateY(y); root.setTranslateZ(z);
+            root.setScaleX(1.0); root.setScaleY(1.0); root.setScaleZ(1.0);
 
             tumble.getTransforms().addAll(rotX, rotY, rotZ);
             yawGroup.getTransforms().add(yawRotate);
@@ -490,42 +366,20 @@ public final class DiceController {
 
         private void setFinalOrientation(int value, double yaw) {
             switch (value) {
-                case 1 -> {
-                    faceRotate.setAxis(Rotate.Z_AXIS);
-                    faceRotate.setAngle(0);
-                }
-                case 2 -> {
-                    faceRotate.setAxis(Rotate.X_AXIS);
-                    faceRotate.setAngle(-90);
-                }
-                case 3 -> {
-                    faceRotate.setAxis(Rotate.Z_AXIS);
-                    faceRotate.setAngle(90);
-                }
-                case 4 -> {
-                    faceRotate.setAxis(Rotate.Z_AXIS);
-                    faceRotate.setAngle(-90);
-                }
-                case 5 -> {
-                    faceRotate.setAxis(Rotate.X_AXIS);
-                    faceRotate.setAngle(90);
-                }
-                case 6 -> {
-                    faceRotate.setAxis(Rotate.X_AXIS);
-                    faceRotate.setAngle(180);
-                }
+                case 1 -> { faceRotate.setAxis(Rotate.Z_AXIS); faceRotate.setAngle(0); }
+                case 2 -> { faceRotate.setAxis(Rotate.X_AXIS); faceRotate.setAngle(-90); }
+                case 3 -> { faceRotate.setAxis(Rotate.Z_AXIS); faceRotate.setAngle(90); }
+                case 4 -> { faceRotate.setAxis(Rotate.Z_AXIS); faceRotate.setAngle(-90); }
+                case 5 -> { faceRotate.setAxis(Rotate.X_AXIS); faceRotate.setAngle(90); }
+                case 6 -> { faceRotate.setAxis(Rotate.X_AXIS); faceRotate.setAngle(180); }
                 default -> throw new IllegalArgumentException("dice value " + value);
             }
             yawRotate.setAngle(yaw);
         }
 
         private void resetPose() {
-            root.setTranslateX(homeX);
-            root.setTranslateY(homeY);
-            root.setTranslateZ(homeZ);
-            rotX.setAngle(0);
-            rotY.setAngle(0);
-            rotZ.setAngle(0);
+            root.setTranslateX(homeX); root.setTranslateY(homeY); root.setTranslateZ(homeZ);
+            rotX.setAngle(0); rotY.setAngle(0); rotZ.setAngle(0);
         }
     }
 }

@@ -27,31 +27,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.BiConsumer;
 
-/**
- * Six imported player tokens on the v2 lake board.
- *
- * <p>Each token is loaded from its own GLB and wrapped in a placement Group.
- * The loaded model keeps its original bottom-centre origin; the placement
- * Group owns board translation, outward yaw and movement animation. Only the
- * MeshViews whose id starts with {@code TOKEN_BODY} receive the player colour,
- * so wheels, windows, eyes, sails, gold trim and the dark pedestal stay
- * neutral.</p>
- *
- * <p>Tokens start together on GO. Occupants of one tile are spread in a
- * short/long-axis grid (up to 2 x 3) so six models never completely overlap.
- * The movement API mirrors the existing 2.5D board:
- * {@link #movePlayerSteps(int, int)}, {@link #getPlayerPosition(int)} and
- * {@link #setOnPlayerMoved(BiConsumer)}.</p>
- */
 public final class PlayerTokenLayer {
 
     private static final Color[] PLAYER_COLORS = {
-            Color.web("#E0343E"), // red
-            Color.web("#2E86C1"), // blue
-            Color.web("#2E9E5B"), // green
-            Color.web("#F4D03F"), // yellow
-            Color.web("#8E44AD"), // purple
-            Color.web("#E8871E"), // orange
+            Color.web("#E0343E"),
+            Color.web("#2E86C1"),
+            Color.web("#2E9E5B"),
+            Color.web("#F4D03F"),
+            Color.web("#8E44AD"),
+            Color.web("#E8871E"),
     };
     private static final String[] COLOR_NAMES = {"红", "蓝", "绿", "黄", "紫", "橙"};
 
@@ -84,48 +68,24 @@ public final class PlayerTokenLayer {
         layoutTile(0, false);
     }
 
-    public Group getLayer() {
-        return layer;
-    }
+    public Group getLayer() { return layer; }
+    public int getPlayerCount() { return players.size(); }
+    public PlayerToken getPlayer(int index) { return players.get(index); }
+    public int getPlayerPosition(int index) { return players.get(index).tileIndex(); }
+    public int getTurnIndex() { return nextPlayer; }
+    public boolean isAnimating() { return animating; }
 
-    public int getPlayerCount() {
-        return players.size();
-    }
-
-    public PlayerToken getPlayer(int index) {
-        return players.get(index);
-    }
-
-    public int getPlayerPosition(int index) {
-        return players.get(index).tileIndex();
-    }
-
-    public int getTurnIndex() {
-        return nextPlayer;
-    }
-
-    public boolean isAnimating() {
-        return animating;
-    }
-
-    /** Independent display scale for a token; default is 1.0. */
     public void setTokenScale(int index, double scale) {
         Group root = players.get(index).root();
-        root.setScaleX(scale);
-        root.setScaleY(scale);
-        root.setScaleZ(scale);
+        root.setScaleX(scale); root.setScaleY(scale); root.setScaleZ(scale);
     }
 
-    /** Independent yaw for one token, in degrees around Y. */
     public void setTokenRotation(int index, double degrees) {
         players.get(index).root().setRotate(degrees);
     }
 
-    public double getTileTopY() {
-        return tileTopY;
-    }
+    public double getTileTopY() { return tileTopY; }
 
-    /** World centre of a tile at the printed surface height. */
     public Point3D getTileCenter(int tile) {
         double designX = BoardGeometry.centerX(tile) - 470.0;
         double designZ = BoardGeometry.centerY(tile) - 470.0;
@@ -138,73 +98,56 @@ public final class PlayerTokenLayer {
     public void setOnPlayerMoved(BiConsumer<Integer, Integer> listener) {
         this.onPlayerMoved = listener;
     }
-
     public void setOnMovementFinished(BiConsumer<Integer, Integer> listener) {
         this.onMovementFinished = listener;
     }
-
-    /** Fired when an animated move starts; args are playerIndex and target tile. */
     public void setOnPlayerMoveStarted(BiConsumer<Integer, Integer> listener) {
         this.onPlayerMoveStarted = listener;
     }
 
-    /** Set which player is considered current for moveNextPlayer. */
     public void setTurnIndex(int index) {
-        if (index >= 0 && index < players.size()) {
-            nextPlayer = index;
-        }
+        if (index >= 0 && index < players.size()) nextPlayer = index;
     }
 
-    /**
-     * Animate a player to an exact tile, taking the forward ring path.
-     * Returns false while another move is running or for invalid indices.
-     */
     public boolean movePlayerToTile(int index, int tile) {
         if (index < 0 || index >= players.size() || tile < 0 || tile >= BoardGeometry.TILES) {
             return false;
         }
         int current = players.get(index).tileIndex();
         int steps = (tile - current + BoardGeometry.TILES) % BoardGeometry.TILES;
-        if (steps == 0) {
-            return true;
-        }
+        if (steps == 0) return true;
         return movePlayerSteps(index, steps);
     }
 
-    /**
-     * Set a player's tile. {@code animate=true} walks one tile at a time;
-     * {@code false} is an immediate teleport. Immediate changes do not fire
-     * movement callbacks.
-     */
     public boolean setPlayerTile(int index, int tile, boolean animate) {
         if (index < 0 || index >= players.size() || tile < 0 || tile >= BoardGeometry.TILES) {
             return false;
         }
-        if (animate) {
-            return movePlayerToTile(index, tile);
-        }
+        if (animate) return movePlayerToTile(index, tile);
         teleportPlayer(index, tile);
         return true;
     }
 
     /** Move the next player in turn order; ignored while animating. */
     public boolean moveNextPlayer(int steps) {
-        if (animating) {
-            return false;
-        }
+        if (animating) return false;
         int index = nextPlayer;
-        if (!movePlayerSteps(index, steps)) {
-            return false;
-        }
+        if (!movePlayerSteps(index, steps)) return false;
         nextPlayer = (nextPlayer + 1) % players.size();
         return true;
     }
 
-    /** Animate a player forward (positive) or backward (negative) around the ring. */
+    /**
+     * Move the current player WITHOUT advancing to the next player.
+     * Used for doubles: the same player rolls again after moving.
+     */
+    public boolean moveCurrentPlayer(int steps) {
+        if (animating) return false;
+        return movePlayerSteps(nextPlayer, steps);
+    }
+
     public boolean movePlayerSteps(int index, int steps) {
-        if (animating || steps == 0 || index < 0 || index >= players.size()) {
-            return false;
-        }
+        if (animating || steps == 0 || index < 0 || index >= players.size()) return false;
         PlayerToken player = players.get(index);
         Group root = player.root();
         int sourceTile = player.tileIndex();
@@ -237,36 +180,24 @@ public final class PlayerTokenLayer {
                             tileTopY + HOP_HEIGHT, Interpolator.EASE_OUT)));
             timeline.getKeyFrames().add(new KeyFrame(
                     Duration.millis(end),
-                    new KeyValue(root.translateXProperty(), position[0],
-                            Interpolator.EASE_BOTH),
-                    new KeyValue(root.translateZProperty(), position[1],
-                            Interpolator.EASE_BOTH),
-                    new KeyValue(root.translateYProperty(), tileTopY,
-                            Interpolator.EASE_IN),
-                    new KeyValue(root.rotateProperty(), targetYaw,
-                            Interpolator.EASE_BOTH)));
+                    new KeyValue(root.translateXProperty(), position[0], Interpolator.EASE_BOTH),
+                    new KeyValue(root.translateZProperty(), position[1], Interpolator.EASE_BOTH),
+                    new KeyValue(root.translateYProperty(), tileTopY, Interpolator.EASE_IN),
+                    new KeyValue(root.rotateProperty(), targetYaw, Interpolator.EASE_BOTH)));
             yaw = targetYaw;
         }
 
-        if (onPlayerMoveStarted != null) {
-            onPlayerMoveStarted.accept(index, targetTile);
-        }
+        if (onPlayerMoveStarted != null) onPlayerMoveStarted.accept(index, targetTile);
         animating = true;
         timeline.setOnFinished(event -> {
             player.setTileIndex(targetTile);
-            // Re-pack both source and destination so remaining occupants
-            // close the gap and the arriving token gets its final slot.
             layoutTile(sourceTile, true);
             layoutTile(targetTile, true);
             PauseTransition settle = new PauseTransition(Duration.millis(SETTLE_MS));
             settle.setOnFinished(settled -> {
                 animating = false;
-                if (onPlayerMoved != null) {
-                    onPlayerMoved.accept(index, targetTile);
-                }
-                if (onMovementFinished != null) {
-                    onMovementFinished.accept(index, targetTile);
-                }
+                if (onPlayerMoved != null) onPlayerMoved.accept(index, targetTile);
+                if (onMovementFinished != null) onMovementFinished.accept(index, targetTile);
             });
             settle.play();
         });
@@ -274,7 +205,6 @@ public final class PlayerTokenLayer {
         return true;
     }
 
-    /** Immediately move one token to a tile (used by review captures/tests). */
     public void teleportPlayer(int index, int tile) {
         PlayerToken player = players.get(index);
         int previous = player.tileIndex();
@@ -283,7 +213,6 @@ public final class PlayerTokenLayer {
         layoutTile(player.tileIndex(), false);
     }
 
-    /** Return all tokens to GO. */
     public void resetAll(boolean animate) {
         for (PlayerToken player : players) {
             player.setTileIndex(0);
@@ -368,9 +297,7 @@ public final class PlayerTokenLayer {
 
     private void layoutTile(int tile, boolean animate) {
         List<PlayerToken> occupants = occupants(tile);
-        if (occupants.isEmpty()) {
-            return;
-        }
+        if (occupants.isEmpty()) return;
         double[][] slots = slots(occupants.size());
         for (int i = 0; i < occupants.size(); i++) {
             place(occupants.get(i), tile, slots[i][0], slots[i][1], animate);
@@ -401,9 +328,7 @@ public final class PlayerTokenLayer {
     private List<PlayerToken> occupants(int tile) {
         List<PlayerToken> occupants = new ArrayList<>();
         for (PlayerToken player : players) {
-            if (player.tileIndex() == tile) {
-                occupants.add(player);
-            }
+            if (player.tileIndex() == tile) occupants.add(player);
         }
         occupants.sort(Comparator.comparingInt(PlayerToken::index));
         return occupants;
@@ -447,14 +372,10 @@ public final class PlayerTokenLayer {
     private double yawFor(int tile) {
         BoardGeometry.Side side = BoardGeometry.side(tile);
         switch (side) {
-            case BOTTOM:
-                return 0;
-            case TOP:
-                return 180;
-            case RIGHT:
-                return 90;
-            case LEFT:
-                return -90;
+            case BOTTOM: return 0;
+            case TOP: return 180;
+            case RIGHT: return 90;
+            case LEFT: return -90;
             default:
                 double[] center = tileCenter(tile);
                 return Math.toDegrees(Math.atan2(
@@ -484,12 +405,8 @@ public final class PlayerTokenLayer {
 
     private static double nearestAngle(double current, double target) {
         double result = target;
-        while (result - current > 180) {
-            result -= 360;
-        }
-        while (result - current < -180) {
-            result += 360;
-        }
+        while (result - current > 180) result -= 360;
+        while (result - current < -180) result += 360;
         return result;
     }
 
@@ -501,18 +418,12 @@ public final class PlayerTokenLayer {
         String monopolyRoot = System.getProperty("monopoly.assets.root");
         if (monopolyRoot != null && !monopolyRoot.isBlank()) {
             Path pieces = Path.of(monopolyRoot, "pieces");
-            if (Files.isDirectory(pieces)) {
-                return pieces.toAbsolutePath().normalize();
-            }
+            if (Files.isDirectory(pieces)) return pieces.toAbsolutePath().normalize();
         }
         Path local = Path.of("assets", "tokens");
-        if (Files.isDirectory(local)) {
-            return local.toAbsolutePath().normalize();
-        }
+        if (Files.isDirectory(local)) return local.toAbsolutePath().normalize();
         Path fromRoot = Path.of("winter_village_javafx", "assets", "tokens");
-        if (Files.isDirectory(fromRoot)) {
-            return fromRoot.toAbsolutePath().normalize();
-        }
+        if (Files.isDirectory(fromRoot)) return fromRoot.toAbsolutePath().normalize();
         return local.toAbsolutePath().normalize();
     }
 }

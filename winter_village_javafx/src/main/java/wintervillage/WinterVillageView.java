@@ -42,25 +42,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
 
-/**
- * Self-contained JavaFX 3D viewer for the Winter Village samples.
- *
- * <p>The active {@link WinterVillageProfile} selects the GLB and the matching
- * board/camera constants. v2 (default) is the square-lake scene: the composite
- * GLB keeps its lake centre at JavaFX {@code (0, 0)} and its base underside at
- * {@code Y = 0}; the v1 profile preserves the original approved pond scene.
- * No axis rotation is applied: glTF is Y-up with front +Z, and the initial
- * camera sits on the +X/+Z side.</p>
- *
- * <p>A compact Monopoly board is placed on the frozen lake. In v2 it is centred
- * exactly on the square lake; the v1 profile keeps the original pond offset and
- * pine adjustment. Six imported player tokens start on GO, receive the six
- * player colours and support the same forward/backward movement API style as
- * the 2.5D board. Two 3D dice sit on the centre field; a roll fixes both values
- * first, settles the visible top faces, then moves the current token one tile
- * at a time. Two card decks sit above the MONOPOLY banner; drawing a card lifts
- * it, stands it upright, reveals the printed side and returns it to the deck.</p>
- */
 public final class WinterVillageView extends StackPane {
 
     private final WinterVillageProfile profile = WinterVillageProfile.active();
@@ -91,7 +72,6 @@ public final class WinterVillageView extends StackPane {
 
     public WinterVillageView(boolean showHud) {
         getStyleClass().add("winter-village-view");
-        // Soft blue-grey studio backdrop matching the approved hero render.
         setStyle("-fx-background-color: radial-gradient(center 50% 42%, radius 78%,"
                 + " #b9c8d6 0%, #9fb2c2 58%, #7f95aa 100%);");
 
@@ -111,8 +91,6 @@ public final class WinterVillageView extends StackPane {
         subScene.heightProperty().bind(viewport.heightProperty());
         getChildren().add(viewport);
 
-        // Dedicated interaction layer: it catches orbit/zoom drags but leaves
-        // the HUD (especially the reset button) on top and clickable.
         Pane interaction = new Pane();
         interaction.setPickOnBounds(true);
         interaction.setCursor(Cursor.OPEN_HAND);
@@ -129,33 +107,13 @@ public final class WinterVillageView extends StackPane {
         installKeyboardReset();
     }
 
-    public PerspectiveCamera getCamera() {
-        return camera;
-    }
-
-    public OrbitCameraController getCameraController() {
-        return cameraController;
-    }
-
-    public Group getModelRoot() {
-        return modelRoot;
-    }
-
-    public PlayerTokenLayer getPlayerTokens() {
-        return playerTokens;
-    }
-
-    public DiceController getDiceController() {
-        return diceController;
-    }
-
-    public CardController getCardController() {
-        return cardController;
-    }
-
-    public WinterVillageProfile getProfile() {
-        return profile;
-    }
+    public PerspectiveCamera getCamera() { return camera; }
+    public OrbitCameraController getCameraController() { return cameraController; }
+    public Group getModelRoot() { return modelRoot; }
+    public PlayerTokenLayer getPlayerTokens() { return playerTokens; }
+    public DiceController getDiceController() { return diceController; }
+    public CardController getCardController() { return cardController; }
+    public WinterVillageProfile getProfile() { return profile; }
 
     private void configureCamera() {
         camera.setNearClip(0.1);
@@ -167,32 +125,20 @@ public final class WinterVillageView extends StackPane {
 
     private void configureLights() {
         AmbientLight ambient = new AmbientLight(Color.rgb(72, 83, 96));
-
-        // Key light from the upper-left/front: it grazes the cottage fronts
-        // and the snow, like the soft daylight in the approved render.
         DirectionalLight key = new DirectionalLight(Color.rgb(141, 135, 126));
         key.setDirection(new Point3D(0.42, -0.62, -0.66));
-
-        // Cool fill from the opposite side keeps the shaded faces readable.
         DirectionalLight fill = new DirectionalLight(Color.rgb(48, 64, 82));
         fill.setDirection(new Point3D(-0.55, -0.25, 0.72));
-
-        // A small warm bounce near the pond suggests the lantern light without
-        // changing the overall cool dusk palette.
         PointLight warmBounce = new PointLight(Color.rgb(52, 29, 13));
         warmBounce.setTranslateX(profile.boardX);
         warmBounce.setTranslateY(3.4);
         warmBounce.setTranslateZ(profile.boardZ);
         warmBounce.setMaxRange(24);
-
-        // A soft local lamp over the lake keeps the printed board and the
-        // MONOPOLY banner readable against the cool dusk lighting.
         PointLight boardLamp = new PointLight(Color.rgb(94, 80, 62));
         boardLamp.setTranslateX(profile.boardX);
         boardLamp.setTranslateY(5.4);
         boardLamp.setTranslateZ(profile.boardZ);
         boardLamp.setMaxRange(10);
-
         worldRoot.getChildren().addAll(ambient, key, fill, warmBounce, boardLamp);
     }
 
@@ -211,9 +157,6 @@ public final class WinterVillageView extends StackPane {
                     profile.id, asset.getFileName(), bounds.getWidth(), bounds.getHeight(),
                     bounds.getDepth(), bounds.getMinY(), bounds.getMaxY(), meshViews, millis);
 
-            // The composite is already ground-contact at Y = 0. v2 keeps the
-            // lake centre at X/Z = 0; v1 keeps its exported content centre.
-            // Do not rotate it: the camera is responsible for the view.
             modelRoot = loaded;
             worldRoot.getChildren().add(loaded);
 
@@ -227,15 +170,9 @@ public final class WinterVillageView extends StackPane {
                 }
             }
 
-            // Place the Monopoly board on the frozen lake. v2 centres it on
-            // the square lake at (0, 0); v1 uses the approved pond offset.
             Group board = MonopolyBoardModel.create(
                     profile.boardWidth, profile.boardX, profile.boardY, profile.boardZ);
             worldRoot.getChildren().add(board);
-            System.out.printf(Locale.ROOT,
-                    "[winter-village] Monopoly board placed at (%.2f, %.2f, %.2f),"
-                            + " outer width %.2f m%n",
-                    profile.boardX, profile.boardY, profile.boardZ, profile.boardWidth);
 
             playerTokens = new PlayerTokenLayer(worldRoot, profile);
             playerTokens.setOnPlayerMoved(this::onPlayerMoved);
@@ -273,9 +210,7 @@ public final class WinterVillageView extends StackPane {
 
     private void setTokenStatus(String text) {
         pendingTokenStatus = text;
-        if (tokenStatus != null) {
-            tokenStatus.setText(text);
-        }
+        if (tokenStatus != null) tokenStatus.setText(text);
     }
 
     private void onDiceResult(DiceController.RollResult result) {
@@ -283,6 +218,9 @@ public final class WinterVillageView extends StackPane {
                 + " = " + result.total() + " · 前进 " + result.total() + " 格");
     }
 
+    // ============================================================
+    // FIXED: Re-enable the button + show "double" message when IDLE
+    // ============================================================
     private void onDiceStateChanged(DiceController.State state) {
         updateBusyControls();
         if (state == DiceController.State.ROLLING) {
@@ -292,6 +230,15 @@ public final class WinterVillageView extends StackPane {
             DiceController.RollResult result = diceController.getLastResult();
             setDiceStatus("骰子：" + result.die1() + " + " + result.die2()
                     + " = " + result.total() + " · 移动中…");
+        } else if (state == DiceController.State.IDLE) {
+            DiceController.RollResult result = diceController.getLastResult();
+            if (result != null && result.die1() == result.die2()) {
+                setDiceStatus("骰子：" + result.die1() + " + " + result.die2()
+                        + " = " + result.total() + " · 双数！请再掷一次");
+            } else if (result != null) {
+                setDiceStatus("骰子：" + result.die1() + " + " + result.die2()
+                        + " = " + result.total() + " · 移动完成");
+            }
         }
     }
 
@@ -315,22 +262,14 @@ public final class WinterVillageView extends StackPane {
     }
 
     private void updateBusyControls() {
-        if (rollButton == null) {
-            return;
-        }
+        if (rollButton == null) return;
         boolean diceBusy = diceController != null && diceController.isBusy();
         boolean cardBusy = cardController != null && cardController.isBusy();
         boolean busy = diceBusy || cardBusy;
         rollButton.setDisable(busy);
-        if (activationButton != null) {
-            activationButton.setDisable(busy);
-        }
-        if (resourceButton != null) {
-            resourceButton.setDisable(busy);
-        }
-        if (resetTokensButton != null) {
-            resetTokensButton.setDisable(busy);
-        }
+        if (activationButton != null) activationButton.setDisable(busy);
+        if (resourceButton != null) resourceButton.setDisable(busy);
+        if (resetTokensButton != null) resetTokensButton.setDisable(busy);
         if (diceController != null) {
             rollButton.setText(switch (diceController.getState()) {
                 case IDLE -> "掷骰子";
@@ -343,40 +282,28 @@ public final class WinterVillageView extends StackPane {
 
     private void setDiceStatus(String text) {
         pendingDiceStatus = text;
-        if (diceStatus != null) {
-            diceStatus.setText(text);
-        }
+        if (diceStatus != null) diceStatus.setText(text);
     }
 
     private void setCardStatus(String text) {
         pendingCardStatus = text;
-        if (cardStatus != null) {
-            cardStatus.setText(text);
-        }
+        if (cardStatus != null) cardStatus.setText(text);
     }
 
     private void rollDiceFromHud() {
-        if (diceController != null && cardController != null && cardController.isBusy()) {
-            return;
-        }
-        if (diceController != null) {
-            diceController.rollRandom();
-        }
+        if (diceController != null && cardController != null && cardController.isBusy()) return;
+        if (diceController != null) diceController.rollRandom();
     }
 
     private void drawActivationFromHud() {
-        if (diceController != null && diceController.isBusy()) {
-            return;
-        }
+        if (diceController != null && diceController.isBusy()) return;
         if (cardController != null && cardController.draw(CardType.ACTIVATION)) {
             setCardStatus("卡片：抽取激活卡…");
         }
     }
 
     private void drawResourceFromHud() {
-        if (diceController != null && diceController.isBusy()) {
-            return;
-        }
+        if (diceController != null && diceController.isBusy()) return;
         if (cardController != null && cardController.draw(CardType.RESOURCE)) {
             setCardStatus("卡片：抽取公共资源卡…");
         }
@@ -414,9 +341,7 @@ public final class WinterVillageView extends StackPane {
 
     private void installKeyboardReset() {
         sceneProperty().addListener((observable, oldScene, newScene) -> {
-            if (newScene == null) {
-                return;
-            }
+            if (newScene == null) return;
             newScene.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
                 if (event.getCode() == KeyCode.R || event.getCode() == KeyCode.HOME) {
                     cameraController.reset();
@@ -625,15 +550,8 @@ public final class WinterVillageView extends StackPane {
         return count;
     }
 
-    /**
-     * Shift a loaded glTF placement node in parent-space X. The loader stores
-     * the glTF transform as an Affine in the node's transform list, so editing
-     * its translation is safer than mixing translateX with that affine.
-     */
     private static void shiftNodeX(Node node, double dx) {
-        if (node == null) {
-            return;
-        }
+        if (node == null) return;
         for (Transform transform : node.getTransforms()) {
             if (transform instanceof Affine affine) {
                 affine.setTx(affine.getTx() + dx);
