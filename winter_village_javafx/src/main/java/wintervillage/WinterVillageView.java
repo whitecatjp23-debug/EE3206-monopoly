@@ -32,7 +32,9 @@ import javafx.scene.transform.Transform;
 import wintervillage.asset.ModelAssetLoader;
 import wintervillage.board.MonopolyBoardModel;
 import wintervillage.board.TileDef;
+import wintervillage.board.TileType;
 import wintervillage.cards.CardController;
+import wintervillage.cards.CardDefinition;
 import wintervillage.cards.CardType;
 import wintervillage.dice.DiceController;
 import wintervillage.tokens.PlayerTokenLayer;
@@ -65,6 +67,11 @@ public final class WinterVillageView extends StackPane {
     private String pendingTokenStatus = "6 枚棋子 · 全部在起点";
     private String pendingDiceStatus = "骰子：准备就绪";
     private String pendingCardStatus = "卡片：准备就绪";
+
+    /** Player who just moved. Used for card effects, because moveNextPlayer()
+     *  has already advanced playerTokens.getTurnIndex() by the time
+     *  onDiceTurnComplete runs. */
+    private int lastMovedPlayer = -1;
 
     public WinterVillageView() {
         this(true);
@@ -176,6 +183,9 @@ public final class WinterVillageView extends StackPane {
 
             playerTokens = new PlayerTokenLayer(worldRoot, profile);
             playerTokens.setOnPlayerMoved(this::onPlayerMoved);
+            playerTokens.setOnPlayerMoveStarted(
+                    (playerIndex, targetTile) -> lastMovedPlayer = playerIndex);   // ← NEW
+
             setTokenStatus("6 枚棋子 · 全部在起点");
 
             diceController = new DiceController(worldRoot, profile, playerTokens);
@@ -186,6 +196,8 @@ public final class WinterVillageView extends StackPane {
             cardController = new CardController(worldRoot, profile, cameraController);
             cardController.setOnStateChanged(this::onCardStateChanged);
             cardController.setOnCardDrawn(this::onCardDrawn);
+            cardController.setOnCardDismissed(this::onCardDismissed);
+
             diceController.setExternalBusy(() -> cardController != null && cardController.isBusy());
             cardController.setExternalBusy(() -> diceController != null && diceController.isBusy());
         } catch (IOException | RuntimeException ex) {
@@ -218,9 +230,6 @@ public final class WinterVillageView extends StackPane {
                 + " = " + result.total() + " · 前进 " + result.total() + " 格");
     }
 
-    // ============================================================
-    // FIXED: Re-enable the button + show "double" message when IDLE
-    // ============================================================
     private void onDiceStateChanged(DiceController.State state) {
         updateBusyControls();
         if (state == DiceController.State.ROLLING) {
@@ -248,6 +257,52 @@ public final class WinterVillageView extends StackPane {
             setDiceStatus("骰子：" + result.die1() + " + " + result.die2()
                     + " = " + result.total() + " · 移动完成");
         }
+
+        int player = lastMovedPlayer;             // ← who actually moved
+        if (player < 0) {
+            advanceTurn();
+            return;
+        }
+
+        int tileIndex = playerTokens.getPlayerPosition(player);
+        TileType type = TileDef.all()[tileIndex].type();
+
+        switch (type) {
+            case CHANCE -> {
+                lockControlsForCard();
+                setCardStatus("卡片：停在机会格，自动抽取…");
+                cardController.draw(CardType.ACTIVATION);
+            }
+            case COMMUNITY -> {
+                lockControlsForCard();
+                setCardStatus("卡片：停在社区福利格，自动抽取…");
+                cardController.draw(CardType.RESOURCE);
+            }
+            case GO_TO_JAIL -> {
+                playerTokens.teleportPlayer(player, 10);
+                setDiceStatus("玩家 " + (player + 1) + " 被送入監獄！");
+                advanceTurn();
+            }
+            case JAIL -> {
+                setDiceStatus("玩家 " + (player + 1) + " 只是探監");
+                advanceTurn();
+            }
+            default -> advanceTurn();
+        }
+    }
+
+    private void lockControlsForCard() {
+        if (rollButton != null) rollButton.setDisable(true);
+        if (activationButton != null) activationButton.setDisable(true);
+        if (resourceButton != null) resourceButton.setDisable(true);
+        if (resetTokensButton != null) resetTokensButton.setDisable(true);
+    }
+
+    private void advanceTurn() {
+        // moveNextPlayer() has already advanced nextPlayer.
+        // advanceTurn just refreshes the HUD; updateBusyControls re-enables buttons.
+        updateBusyControls();
+        setCardStatus("卡片：等待下一位玩家掷骰…");
     }
 
     private void onCardStateChanged(CardController.State state) {
@@ -258,7 +313,42 @@ public final class WinterVillageView extends StackPane {
     }
 
     private void onCardDrawn(CardController.DrawnCard drawn) {
-        setCardStatus(drawn.type().displayName() + "：" + drawn.card().title());
+        CardDefinition card = drawn.card();
+        int player = lastMovedPlayer;
+        setCardStatus(drawn.type().displayName() + "：" + card.title()
+                + " — " + card.description());
+
+        if (card.amount() > 0) {
+            // TODO: players.get(player).addMoney(card.amount());
+            System.out.println("[CARD] Player " + player + " gains $" + card.amount());
+        } else if (card.amount() < 0) {
+            // TODO: players.get(player).deductMoney(-card.amount());
+            System.out.println("[CARD] Player " + player + " pays $" + (-card.amount()));
+        }
+
+        if ("get_out_of_jail".equals(card.id())) {
+            System.out.println("[CARD] Player " + player + " keeps Get Out of Jail Free");
+        }
+    }
+
+    private void onCardDismissed(CardController.DrawnCard drawn) {
+        CardDefinition card = drawn.card();
+        int player = lastMovedPlayer;
+
+        if (card.targetTile() >= 0) {
+            playerTokens.movePlayerToTile(player, card.targetTile());
+            System.out.println("[CARD] Player " + player + " moves to tile " + card.targetTile());
+        } else if (card.targetTile() < -1) {
+            playerTokens.movePlayerSteps(player, card.targetTile());
+            System.out.println("[CARD] Player " + player + " moves back " + (-card.targetTile()) + " spaces");
+        }
+
+        if (card.goToJail()) {
+            playerTokens.teleportPlayer(player, 10);
+            System.out.println("[CARD] Player " + player + " goes to Jail");
+        }
+
+        advanceTurn();
     }
 
     private void updateBusyControls() {
@@ -298,14 +388,14 @@ public final class WinterVillageView extends StackPane {
     private void drawActivationFromHud() {
         if (diceController != null && diceController.isBusy()) return;
         if (cardController != null && cardController.draw(CardType.ACTIVATION)) {
-            setCardStatus("卡片：抽取激活卡…");
+            setCardStatus("卡片：抽取机会卡…");
         }
     }
 
     private void drawResourceFromHud() {
         if (diceController != null && diceController.isBusy()) return;
         if (cardController != null && cardController.draw(CardType.RESOURCE)) {
-            setCardStatus("卡片：抽取公共资源卡…");
+            setCardStatus("卡片：抽取社区福利卡…");
         }
     }
 
@@ -316,6 +406,7 @@ public final class WinterVillageView extends StackPane {
             return;
         }
         playerTokens.resetAll(true);
+        lastMovedPlayer = -1;
         setTokenStatus("6 枚棋子 · 归位到起点");
         setDiceStatus("骰子：准备就绪");
         setCardStatus("卡片：准备就绪");
@@ -388,11 +479,11 @@ public final class WinterVillageView extends StackPane {
         styleRollButton(rollButton);
         rollButton.setOnAction(event -> rollDiceFromHud());
 
-        activationButton = new Button("激活卡");
+        activationButton = new Button("机会卡");
         styleAccentButton(activationButton, CardType.ACTIVATION.accent());
         activationButton.setOnAction(event -> drawActivationFromHud());
 
-        resourceButton = new Button("资源卡");
+        resourceButton = new Button("社区福利卡");
         styleAccentButton(resourceButton, CardType.RESOURCE.accent());
         resourceButton.setOnAction(event -> drawResourceFromHud());
 
@@ -417,7 +508,7 @@ public final class WinterVillageView extends StackPane {
         top.setPickOnBounds(false);
         hud.setTop(top);
 
-        Label hint = new Label("拖动旋转  ·  滚轮缩放  ·  空格掷骰  ·  A 激活  ·  C 资源  ·  T 归位  ·  R 重置");
+        Label hint = new Label("拖动旋转  ·  滚轮缩放  ·  空格掷骰  ·  A 机会  ·  C 社区福利  ·  T 归位  ·  R 重置");
         hint.setMouseTransparent(true);
         hint.setStyle("-fx-font-family: 'PingFang SC'; -fx-font-size: 12px;"
                 + " -fx-text-fill: #eef6fd; -fx-background-color: rgba(20,36,52,0.52);"
