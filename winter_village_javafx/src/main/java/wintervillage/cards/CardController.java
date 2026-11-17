@@ -46,6 +46,9 @@ public final class CardController {
 
     public record DrawnCard(CardType type, CardDefinition card) {
     }
+    
+    private int consecutiveDoubles = 0;
+    private static final int JAIL_TILE = 10;
 
     private static final double CARD_W = 0.56;
     private static final double CARD_H = 0.784;
