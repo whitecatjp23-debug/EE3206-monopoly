@@ -30,12 +30,8 @@ import java.util.function.BiConsumer;
 public final class PlayerTokenLayer {
 
     private static final Color[] PLAYER_COLORS = {
-            Color.web("#E0343E"),
-            Color.web("#2E86C1"),
-            Color.web("#2E9E5B"),
-            Color.web("#F4D03F"),
-            Color.web("#8E44AD"),
-            Color.web("#E8871E"),
+            Color.web("#E0343E"), Color.web("#2E86C1"), Color.web("#2E9E5B"),
+            Color.web("#F4D03F"), Color.web("#8E44AD"), Color.web("#E8871E"),
     };
     private static final String[] COLOR_NAMES = {"红", "蓝", "绿", "黄", "紫", "橙"};
 
@@ -57,11 +53,15 @@ public final class PlayerTokenLayer {
     private BiConsumer<Integer, Integer> onMovementFinished;
     private BiConsumer<Integer, Integer> onPlayerMoveStarted;
 
+    // ★ 新增：控制是否允許 3D 系統自動移動棋子
+    private boolean autoMoveEnabled = true;
+    // ★ 新增：記錄當前動畫，方便強制中斷
+    private Timeline currentTimeline;
+
     public PlayerTokenLayer(Group parent, WinterVillageProfile profile) {
         this.profile = profile;
         this.boardScale = profile.boardWidth / MonopolyBoardModel.DESIGN_WIDTH;
-        this.tileTopY = MonopolyBoardModel.tileTopY(
-                profile.boardWidth, profile.boardY) + 0.002;
+        this.tileTopY = MonopolyBoardModel.tileTopY(profile.boardWidth, profile.boardY) + 0.002;
         layer.setId("PlayerTokenLayer");
         parent.getChildren().add(layer);
         loadPlayers();
@@ -74,6 +74,11 @@ public final class PlayerTokenLayer {
     public int getPlayerPosition(int index) { return players.get(index).tileIndex(); }
     public int getTurnIndex() { return nextPlayer; }
     public boolean isAnimating() { return animating; }
+
+    // ★ 新增：設定是否允許自動移動
+    public void setAutoMoveEnabled(boolean enabled) {
+        this.autoMoveEnabled = enabled;
+    }
 
     public void setTokenScale(int index, double scale) {
         Group root = players.get(index).root();
@@ -95,21 +100,16 @@ public final class PlayerTokenLayer {
                 profile.boardZ + designZ * boardScale);
     }
 
-    public void setOnPlayerMoved(BiConsumer<Integer, Integer> listener) {
-        this.onPlayerMoved = listener;
-    }
-    public void setOnMovementFinished(BiConsumer<Integer, Integer> listener) {
-        this.onMovementFinished = listener;
-    }
-    public void setOnPlayerMoveStarted(BiConsumer<Integer, Integer> listener) {
-        this.onPlayerMoveStarted = listener;
-    }
+    public void setOnPlayerMoved(BiConsumer<Integer, Integer> listener) { this.onPlayerMoved = listener; }
+    public void setOnMovementFinished(BiConsumer<Integer, Integer> listener) { this.onMovementFinished = listener; }
+    public void setOnPlayerMoveStarted(BiConsumer<Integer, Integer> listener) { this.onPlayerMoveStarted = listener; }
 
     public void setTurnIndex(int index) {
         if (index >= 0 && index < players.size()) nextPlayer = index;
     }
 
     public boolean movePlayerToTile(int index, int tile) {
+        if (!autoMoveEnabled) return false;
         if (index < 0 || index >= players.size() || tile < 0 || tile >= BoardGeometry.TILES) {
             return false;
         }
@@ -128,8 +128,8 @@ public final class PlayerTokenLayer {
         return true;
     }
 
-    /** Move the next player in turn order; ignored while animating. */
     public boolean moveNextPlayer(int steps) {
+        if (!autoMoveEnabled) return false;
         if (animating) return false;
         int index = nextPlayer;
         if (!movePlayerSteps(index, steps)) return false;
@@ -137,17 +137,37 @@ public final class PlayerTokenLayer {
         return true;
     }
 
-    /**
-     * Move the current player WITHOUT advancing to the next player.
-     * Used for doubles: the same player rolls again after moving.
-     */
     public boolean moveCurrentPlayer(int steps) {
+        if (!autoMoveEnabled) return false;
         if (animating) return false;
         return movePlayerSteps(nextPlayer, steps);
     }
 
+    // ★ 新增：強制停止目前動畫
+    public void stopAnimation() {
+        if (currentTimeline != null) {
+            currentTimeline.stop();
+            currentTimeline = null;
+        }
+        animating = false;
+    }
+
+    // ★ 新增：強制移動（無視 autoMoveEnabled 開關，由 HUD 手動呼叫）
+    public boolean forceMovePlayerSteps(int index, int steps) {
+        stopAnimation();
+        boolean old = autoMoveEnabled;
+        autoMoveEnabled = true;
+        boolean res = movePlayerSteps(index, steps);
+        autoMoveEnabled = old;
+        return res;
+    }
+
     public boolean movePlayerSteps(int index, int steps) {
+        if (!autoMoveEnabled) return false; // 檢查開關
         if (animating || steps == 0 || index < 0 || index >= players.size()) return false;
+
+        if (currentTimeline != null) currentTimeline.stop();
+
         PlayerToken player = players.get(index);
         Group root = player.root();
         int sourceTile = player.tileIndex();
@@ -155,9 +175,9 @@ public final class PlayerTokenLayer {
         int count = Math.abs(steps);
         int targetTile = BoardGeometry.norm(sourceTile + direction * count);
 
-        Timeline timeline = new Timeline();
+        currentTimeline = new Timeline();
         double yaw = root.getRotate();
-        timeline.getKeyFrames().add(new KeyFrame(Duration.ZERO,
+        currentTimeline.getKeyFrames().add(new KeyFrame(Duration.ZERO,
                 new KeyValue(root.translateXProperty(), root.getTranslateX()),
                 new KeyValue(root.translateYProperty(), tileTopY),
                 new KeyValue(root.translateZProperty(), root.getTranslateZ()),
@@ -174,11 +194,10 @@ public final class PlayerTokenLayer {
                 position = tileCenter(tile);
             }
             double targetYaw = nearestAngle(yaw, yawFor(tile));
-            timeline.getKeyFrames().add(new KeyFrame(
+            currentTimeline.getKeyFrames().add(new KeyFrame(
                     Duration.millis(end - STEP_MS / 2.0),
-                    new KeyValue(root.translateYProperty(),
-                            tileTopY + HOP_HEIGHT, Interpolator.EASE_OUT)));
-            timeline.getKeyFrames().add(new KeyFrame(
+                    new KeyValue(root.translateYProperty(), tileTopY + HOP_HEIGHT, Interpolator.EASE_OUT)));
+            currentTimeline.getKeyFrames().add(new KeyFrame(
                     Duration.millis(end),
                     new KeyValue(root.translateXProperty(), position[0], Interpolator.EASE_BOTH),
                     new KeyValue(root.translateZProperty(), position[1], Interpolator.EASE_BOTH),
@@ -189,7 +208,7 @@ public final class PlayerTokenLayer {
 
         if (onPlayerMoveStarted != null) onPlayerMoveStarted.accept(index, targetTile);
         animating = true;
-        timeline.setOnFinished(event -> {
+        currentTimeline.setOnFinished(event -> {
             player.setTileIndex(targetTile);
             layoutTile(sourceTile, true);
             layoutTile(targetTile, true);
@@ -201,16 +220,25 @@ public final class PlayerTokenLayer {
             });
             settle.play();
         });
-        timeline.play();
+        currentTimeline.play();
         return true;
     }
 
     public void teleportPlayer(int index, int tile) {
+        // ★ 強制中斷動畫並解除鎖定
+        stopAnimation();
+
         PlayerToken player = players.get(index);
         int previous = player.tileIndex();
         player.setTileIndex(BoardGeometry.norm(tile));
         layoutTile(previous, false);
         layoutTile(player.tileIndex(), false);
+    }
+
+    public void setTokenVisible(int index, boolean visible) {
+        if (index >= 0 && index < players.size()) {
+            players.get(index).root().setVisible(visible);
+        }
     }
 
     public void resetAll(boolean animate) {
@@ -230,10 +258,6 @@ public final class PlayerTokenLayer {
         settle.play();
     }
 
-    // ------------------------------------------------------------------
-    // Placement / colour
-    // ------------------------------------------------------------------
-
     private void loadPlayers() {
         Path root = resolveTokenRoot();
         TokenType[] types = TokenType.values();
@@ -244,21 +268,14 @@ public final class PlayerTokenLayer {
                 Group model = ModelAssetLoader.load(path);
                 Color color = PLAYER_COLORS[index];
                 int bodyMeshes = recolorBody(model, color);
-
                 Group tokenRoot = new Group(model);
                 tokenRoot.setId("PlayerToken_" + index + "_" + type.id());
                 tokenRoot.setRotationAxis(Rotate.Y_AXIS);
                 tokenRoot.setTranslateY(tileTopY);
                 layer.getChildren().add(tokenRoot);
-
-                PlayerToken token = new PlayerToken(
-                        index, COLOR_NAMES[index], color, type, tokenRoot);
+                PlayerToken token = new PlayerToken(index, COLOR_NAMES[index], color, type, tokenRoot);
                 token.setTileIndex(0);
                 players.add(token);
-
-                System.out.printf(Locale.ROOT,
-                        "[tokens] loaded %-9s (%s) bodyMeshViews=%d -> %s%n",
-                        type.id(), COLOR_NAMES[index], bodyMeshes, path.getFileName());
             } catch (IOException ex) {
                 throw new IllegalStateException("Failed to load player token: " + path, ex);
             }
@@ -272,9 +289,7 @@ public final class PlayerTokenLayer {
         stack.add(model);
         while (!stack.isEmpty()) {
             Node node = stack.remove(stack.size() - 1);
-            if (node instanceof MeshView meshView
-                    && meshView.getId() != null
-                    && meshView.getId().startsWith("TOKEN_BODY")) {
+            if (node instanceof MeshView meshView && meshView.getId() != null && meshView.getId().startsWith("TOKEN_BODY")) {
                 if (bodyMaterial == null) {
                     bodyMaterial = new PhongMaterial(color);
                     if (meshView.getMaterial() instanceof PhongMaterial original) {
@@ -304,8 +319,7 @@ public final class PlayerTokenLayer {
         }
     }
 
-    private void place(PlayerToken player, int tile,
-                       double shortOffset, double longOffset, boolean animate) {
+    private void place(PlayerToken player, int tile, double shortOffset, double longOffset, boolean animate) {
         double[] position = tilePosition(tile, shortOffset, longOffset);
         double yaw = yawFor(tile);
         Group root = player.root();
@@ -348,8 +362,7 @@ public final class PlayerTokenLayer {
     private double[] tilePosition(int tile, double shortOffset, double longOffset) {
         double[] center = tileCenter(tile);
         BoardGeometry.Side side = BoardGeometry.side(tile);
-        boolean vertical = side == BoardGeometry.Side.LEFT
-                || side == BoardGeometry.Side.RIGHT;
+        boolean vertical = side == BoardGeometry.Side.LEFT || side == BoardGeometry.Side.RIGHT;
         double shortX = vertical ? 0 : 1;
         double shortZ = vertical ? 1 : 0;
         double longX = vertical ? 1 : 0;
@@ -378,9 +391,7 @@ public final class PlayerTokenLayer {
             case LEFT: return -90;
             default:
                 double[] center = tileCenter(tile);
-                return Math.toDegrees(Math.atan2(
-                        center[0] - profile.boardX,
-                        center[1] - profile.boardZ));
+                return Math.toDegrees(Math.atan2(center[0] - profile.boardX, center[1] - profile.boardZ));
         }
     }
 
@@ -389,17 +400,9 @@ public final class PlayerTokenLayer {
             case 1 -> new double[][]{{0, 0}};
             case 2 -> new double[][]{{0, -0.22}, {0, 0.22}};
             case 3 -> new double[][]{{0, -0.38}, {0, 0}, {0, 0.38}};
-            case 4 -> new double[][]{
-                    {-SHORT_SPACING, -0.20}, {SHORT_SPACING, -0.20},
-                    {-SHORT_SPACING, 0.20}, {SHORT_SPACING, 0.20}};
-            case 5 -> new double[][]{
-                    {-SHORT_SPACING, -LONG_SPACING}, {SHORT_SPACING, -LONG_SPACING},
-                    {-SHORT_SPACING, 0}, {SHORT_SPACING, 0},
-                    {-SHORT_SPACING, LONG_SPACING}};
-            default -> new double[][]{
-                    {-SHORT_SPACING, -LONG_SPACING}, {SHORT_SPACING, -LONG_SPACING},
-                    {-SHORT_SPACING, 0}, {SHORT_SPACING, 0},
-                    {-SHORT_SPACING, LONG_SPACING}, {SHORT_SPACING, LONG_SPACING}};
+            case 4 -> new double[][]{{-SHORT_SPACING, -0.20}, {SHORT_SPACING, -0.20}, {-SHORT_SPACING, 0.20}, {SHORT_SPACING, 0.20}};
+            case 5 -> new double[][]{{-SHORT_SPACING, -LONG_SPACING}, {SHORT_SPACING, -LONG_SPACING}, {-SHORT_SPACING, 0}, {SHORT_SPACING, 0}, {-SHORT_SPACING, LONG_SPACING}};
+            default -> new double[][]{{-SHORT_SPACING, -LONG_SPACING}, {SHORT_SPACING, -LONG_SPACING}, {-SHORT_SPACING, 0}, {SHORT_SPACING, 0}, {-SHORT_SPACING, LONG_SPACING}, {SHORT_SPACING, LONG_SPACING}};
         };
     }
 
@@ -412,9 +415,7 @@ public final class PlayerTokenLayer {
 
     private static Path resolveTokenRoot() {
         String configured = System.getProperty("winter.village.tokens.root");
-        if (configured != null && !configured.isBlank()) {
-            return Path.of(configured).toAbsolutePath().normalize();
-        }
+        if (configured != null && !configured.isBlank()) return Path.of(configured).toAbsolutePath().normalize();
         String monopolyRoot = System.getProperty("monopoly.assets.root");
         if (monopolyRoot != null && !monopolyRoot.isBlank()) {
             Path pieces = Path.of(monopolyRoot, "pieces");

@@ -24,9 +24,6 @@ done < <(find "$DIR/src/main/java" -name '*.java' -print0)
 javac --release 21 \
   --module-path "$JFX" \
   --add-modules "$JFX_MODS" \
-  -encoding UTF-8 \
   -cp "$DIR/lib/*" \
   -d "$DIR/out/classes" \
   "${SOURCES[@]}"
-
-echo "Done. Classes written to $DIR/out/classes"

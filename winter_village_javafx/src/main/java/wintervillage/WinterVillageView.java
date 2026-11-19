@@ -47,7 +47,7 @@ import java.util.Locale;
 public final class WinterVillageView extends StackPane {
 
     private final WinterVillageProfile profile = WinterVillageProfile.active();
-
+    private final boolean showHud; // ★ 新增這行
     private final Group worldRoot = new Group();
     private final PerspectiveCamera camera = new PerspectiveCamera(true);
     private final SubScene subScene;
@@ -68,9 +68,6 @@ public final class WinterVillageView extends StackPane {
     private String pendingDiceStatus = "骰子：准备就绪";
     private String pendingCardStatus = "卡片：准备就绪";
 
-    /** Player who just moved. Used for card effects, because moveNextPlayer()
-     *  has already advanced playerTokens.getTurnIndex() by the time
-     *  onDiceTurnComplete runs. */
     private int lastMovedPlayer = -1;
 
     public WinterVillageView() {
@@ -78,6 +75,7 @@ public final class WinterVillageView extends StackPane {
     }
 
     public WinterVillageView(boolean showHud) {
+        this.showHud = showHud; // ★ 新增這行
         getStyleClass().add("winter-village-view");
         setStyle("-fx-background-color: radial-gradient(center 50% 42%, radius 78%,"
                 + " #b9c8d6 0%, #9fb2c2 58%, #7f95aa 100%);");
@@ -117,7 +115,12 @@ public final class WinterVillageView extends StackPane {
     public PerspectiveCamera getCamera() { return camera; }
     public OrbitCameraController getCameraController() { return cameraController; }
     public Group getModelRoot() { return modelRoot; }
-    public PlayerTokenLayer getPlayerTokens() { return playerTokens; }
+
+    // ★ 這是你要的 Getter，變數名稱已經修正為 playerTokens
+    public PlayerTokenLayer getPlayerTokenLayer() {
+        return this.playerTokens;
+    }
+
     public DiceController getDiceController() { return diceController; }
     public CardController getCardController() { return cardController; }
     public WinterVillageProfile getProfile() { return profile; }
@@ -184,7 +187,7 @@ public final class WinterVillageView extends StackPane {
             playerTokens = new PlayerTokenLayer(worldRoot, profile);
             playerTokens.setOnPlayerMoved(this::onPlayerMoved);
             playerTokens.setOnPlayerMoveStarted(
-                    (playerIndex, targetTile) -> lastMovedPlayer = playerIndex);   // ← NEW
+                    (playerIndex, targetTile) -> lastMovedPlayer = playerIndex);
 
             setTokenStatus("6 枚棋子 · 全部在起点");
 
@@ -252,13 +255,14 @@ public final class WinterVillageView extends StackPane {
     }
 
     private void onDiceTurnComplete() {
+        if (!showHud) return; // ★ 新增這行，如果是被 HUD 控制，就不執行 3D 內建的移動邏輯
         DiceController.RollResult result = diceController.getLastResult();
         if (result != null) {
             setDiceStatus("骰子：" + result.die1() + " + " + result.die2()
                     + " = " + result.total() + " · 移动完成");
         }
 
-        int player = lastMovedPlayer;             // ← who actually moved
+        int player = lastMovedPlayer;
         if (player < 0) {
             advanceTurn();
             return;
@@ -299,8 +303,6 @@ public final class WinterVillageView extends StackPane {
     }
 
     private void advanceTurn() {
-        // moveNextPlayer() has already advanced nextPlayer.
-        // advanceTurn just refreshes the HUD; updateBusyControls re-enables buttons.
         updateBusyControls();
         setCardStatus("卡片：等待下一位玩家掷骰…");
     }
@@ -319,10 +321,8 @@ public final class WinterVillageView extends StackPane {
                 + " — " + card.description());
 
         if (card.amount() > 0) {
-            // TODO: players.get(player).addMoney(card.amount());
             System.out.println("[CARD] Player " + player + " gains $" + card.amount());
         } else if (card.amount() < 0) {
-            // TODO: players.get(player).deductMoney(-card.amount());
             System.out.println("[CARD] Player " + player + " pays $" + (-card.amount()));
         }
 
@@ -332,8 +332,9 @@ public final class WinterVillageView extends StackPane {
     }
 
     private void onCardDismissed(CardController.DrawnCard drawn) {
-        CardDefinition card = drawn.card();
         int player = lastMovedPlayer;
+        if (!showHud) return; // ★ 新增這行，如果是被 HUD 控制，就不執行 3D 內建的移動邏輯
+        CardDefinition card = drawn.card();
 
         if (card.targetTile() >= 0) {
             playerTokens.movePlayerToTile(player, card.targetTile());
