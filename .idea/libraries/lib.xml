@@ -1,0 +1,14 @@
+<component name="libraryTable">
+  <library name="lib">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/winter_village_javafx/lib/jgltf-model-2.0.4.jar!/" />
+      <root url="jar://$PROJECT_DIR$/winter_village_javafx/lib/jgltf-impl-v1-2.0.4.jar!/" />
+      <root url="jar://$PROJECT_DIR$/winter_village_javafx/lib/jgltf-impl-v2-2.0.4.jar!/" />
+      <root url="jar://$PROJECT_DIR$/winter_village_javafx/lib/jackson-databind-2.13.4.2.jar!/" />
+      <root url="jar://$PROJECT_DIR$/winter_village_javafx/lib/jackson-core-2.13.1.jar!/" />
+      <root url="jar://$PROJECT_DIR$/winter_village_javafx/lib/jackson-annotations-2.13.4.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
