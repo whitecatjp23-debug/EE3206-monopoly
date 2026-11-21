@@ -23,6 +23,11 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
+import monopoly.board.Board;
+import monopoly.board.BoardFactory;
+import monopoly.board.BoardPropertyInfo;
+import monopoly.property.Property;
+
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.SourceDataLine;
@@ -1287,36 +1292,17 @@ public class WinterVillagePlayerHUD extends Application {
 
     private void setupWinterBoardData() {
         boardProperties.clear();
-        boardProperties.addAll(
-                new PropertyData(1, "Frozen Brook Trail", ColorGroup.BROWN, 60, new int[]{2, 10, 30, 90, 160, 250}),
-                new PropertyData(3, "Old Mill Cabin", ColorGroup.BROWN, 60, new int[]{4, 20, 60, 180, 320, 450}),
-                new PropertyData(6, "Icicle Hollow", ColorGroup.LIGHT_BLUE, 100, new int[]{6, 30, 90, 270, 400, 550}),
-                new PropertyData(8, "Snowdrift Lane", ColorGroup.LIGHT_BLUE, 100, new int[]{6, 30, 90, 270, 400, 550}),
-                new PropertyData(9, "Crystal Cavern", ColorGroup.LIGHT_BLUE, 120, new int[]{8, 40, 100, 300, 450, 600}),
-                new PropertyData(11, "Aurora Trail", ColorGroup.PINK, 140, new int[]{10, 50, 150, 450, 625, 750}),
-                new PropertyData(13, "Frosty Pines", ColorGroup.PINK, 140, new int[]{10, 50, 150, 450, 625, 750}),
-                new PropertyData(14, "Winterberry Way", ColorGroup.PINK, 160, new int[]{12, 60, 180, 500, 700, 900}),
-                new PropertyData(16, "Fireside Lodge", ColorGroup.ORANGE, 180, new int[]{14, 70, 200, 550, 750, 950}),
-                new PropertyData(18, "Cozy Cabin", ColorGroup.ORANGE, 180, new int[]{14, 70, 200, 550, 750, 950}),
-                new PropertyData(19, "Hearthstone Inn", ColorGroup.ORANGE, 200, new int[]{16, 80, 220, 600, 800, 1000}),
-                new PropertyData(21, "Cardinal Peak", ColorGroup.RED, 220, new int[]{18, 90, 250, 700, 875, 1050}),
-                new PropertyData(23, "Redwood Retreat", ColorGroup.RED, 220, new int[]{18, 90, 250, 700, 875, 1050}),
-                new PropertyData(24, "Ruby Ridge", ColorGroup.RED, 240, new int[]{20, 100, 300, 750, 925, 1100}),
-                new PropertyData(26, "Sunlit Ridge", ColorGroup.YELLOW, 260, new int[]{22, 110, 330, 800, 975, 1150}),
-                new PropertyData(27, "Golden Glade", ColorGroup.YELLOW, 260, new int[]{22, 110, 330, 800, 975, 1150}),
-                new PropertyData(29, "Sunshine Summit", ColorGroup.YELLOW, 280, new int[]{24, 120, 360, 850, 1025, 1200}),
-                new PropertyData(31, "Evergreen Pine", ColorGroup.GREEN, 300, new int[]{26, 130, 390, 900, 1100, 1275}),
-                new PropertyData(32, "Whispering Woods", ColorGroup.GREEN, 300, new int[]{26, 130, 390, 900, 1100, 1275}),
-                new PropertyData(34, "Forest Haven", ColorGroup.GREEN, 320, new int[]{28, 150, 450, 1000, 1200, 1400}),
-                new PropertyData(37, "Glacier Palace", ColorGroup.DARK_BLUE, 350, new int[]{35, 175, 500, 1100, 1300, 1500}),
-                new PropertyData(39, "Winter Summit Citadel", ColorGroup.DARK_BLUE, 400, new int[]{50, 200, 600, 1400, 1700, 2000}),
-                new PropertyData(5, "North Star Station", ColorGroup.RAILROAD, 200, new int[]{25, 50, 100, 200}),
-                new PropertyData(15, "Snowy Express", ColorGroup.RAILROAD, 200, new int[]{25, 50, 100, 200}),
-                new PropertyData(25, "Polar Express", ColorGroup.RAILROAD, 200, new int[]{25, 50, 100, 200}),
-                new PropertyData(35, "Glacier Express", ColorGroup.RAILROAD, 200, new int[]{25, 50, 100, 200}),
-                new PropertyData(12, "Alpine Power", ColorGroup.UTILITY, 150, new int[]{4, 10}),
-                new PropertyData(28, "Meltwater Works", ColorGroup.UTILITY, 150, new int[]{4, 10})
-        );
+        // 地產資料一律由 monopoly.board 的棋盤模型產生，這裡只負責轉成 UI 的 PropertyData，
+        // 避免主程式再手抄一份名稱、價格與租金表而與模型不同步。
+        Board modelBoard = BoardFactory.createWinterVillageBoard();
+        for (int index = 0; index < Board.TILE_COUNT; index++) {
+            Property modelProperty = modelBoard.getPropertyAt(index);
+            if (modelProperty == null) continue; // 事件格（GO、機會、稅…）不是地產
+            BoardPropertyInfo info = new BoardPropertyInfo(index, modelProperty);
+            boardProperties.add(new PropertyData(
+                    info.tileIndex(), info.name(), ColorGroup.valueOf(info.groupKey()),
+                    info.purchasePrice(), info.rentTiers()));
+        }
     }
 
     public static void main(String[] args) { launch(args); }
