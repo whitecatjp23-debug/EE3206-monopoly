@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class TestMain {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InsufficientFundsException, BankruptcyException {
         System.out.println("=== STARTING MONOPOLY S1 ARCHITECTURE TESTS ===");
 
         // 1. Test Player Operations & Encapsulation (Mocking Player behavior)
@@ -46,6 +46,7 @@ public class TestMain {
             @Override public void sendToJail() { this.inJail = true; }
             @Override public void releaseFromJail() { this.inJail = false; }
             @Override public void addProperty(Buyable prop) { properties.add(prop); }
+            @Override public void removeProperty(Buyable prop) { properties.remove(prop); }
             @Override public List<Buyable> getOwnedProperties() { return properties; }
         };
 
@@ -59,15 +60,10 @@ public class TestMain {
             System.out.println("Bankruptcy caught: " + e.getMessage());
         }
 
-        // 3. Test Cell Polymorphism
-        System.out.println("\n--- Testing Cell Polymorphism ---");
-        Cell goCell = new Cell(0, "GO") {
-            @Override
-            public void landOn(Player player) {
-                player.gainMoney(200);
-            }
-        };
-        goCell.landOn(testPlayer);
+        // 3. Test Tile Polymorphism
+        System.out.println("\n--- Testing Tile Polymorphism ---");
+        monopoly.board.tile.Tile goTile = new monopoly.board.tile.GoTile(0, "GO");
+        goTile.landOn(testPlayer, 7);
 
         // 4. Test Generic Deck & Cards
         System.out.println("\n--- Testing Generic Deck & Cards ---");

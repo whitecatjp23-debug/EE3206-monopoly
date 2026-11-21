@@ -26,5 +26,7 @@ public interface Player {
     void releaseFromJail();
 
     void addProperty(Buyable property);
+    /** 移除玩家目前持有的地產；若清單沒有該地產則忽略。 */
+    void removeProperty(Buyable property);
     List<Buyable> getOwnedProperties(); //all the properties of the player.
 }

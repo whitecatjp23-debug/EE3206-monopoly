@@ -166,11 +166,11 @@ public final class TestPlayer implements Player {
     properties.remove(property);
   }
 
+  /** 回傳玩家持有地產的唯讀快照。 */
   @Override
   public List<Buyable> getOwnedProperties() {
     return List.copyOf(properties);
   }
-
   @Override
   public String toString() {
     return name + "($" + balance + ")";
